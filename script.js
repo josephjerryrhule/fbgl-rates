@@ -106,21 +106,25 @@ class FinancialDashboard {
     async init() {
         this.initializeData();
         this.setupEventListeners();
-        await this.loadInitialData();
-        this.createCharts();
-        this.startRealTimeUpdates();
+        this.createCharts(); // Create charts first with initial data
+        this.updateUI(); // Show initial prices immediately
         this.updateLastRefreshTime();
+        this.loadInitialDataBackground(); // Load real data in background
+        this.startRealTimeUpdates();
     }
 
     initializeData() {
         const now = new Date();
         
         Object.keys(this.commodities).forEach(symbol => {
+            // Initialize with base prices immediately (no more $0.00)
+            const basePrice = this.commodities[symbol].basePrice;
+            
             this.data[symbol] = {
                 prices: [],
                 timestamps: [],
-                currentPrice: this.commodities[symbol].basePrice,
-                previousPrice: this.commodities[symbol].basePrice,
+                currentPrice: basePrice,
+                previousPrice: basePrice,
                 change: 0,
                 changePercent: 0,
                 mainChartData: [] // For main chart with different intervals
@@ -131,10 +135,17 @@ class FinancialDashboard {
             // Initialize with some simulated data as fallback
             for (let i = this.maxDataPoints; i >= 0; i--) {
                 const time = new Date(now.getTime() - (i * 60000));
-                const price = this.generateRealisticPrice(symbol, this.commodities[symbol].basePrice);
+                const price = this.generateRealisticPrice(symbol, basePrice);
                 
                 this.data[symbol].prices.push(price);
                 this.data[symbol].timestamps.push(time);
+            }
+            
+            // Set current price to the last generated price to avoid showing $0.00
+            if (this.data[symbol].prices.length > 0) {
+                this.data[symbol].currentPrice = this.data[symbol].prices[this.data[symbol].prices.length - 1];
+                this.data[symbol].previousPrice = this.data[symbol].prices.length > 1 ? 
+                    this.data[symbol].prices[this.data[symbol].prices.length - 2] : this.data[symbol].currentPrice;
             }
             
             this.updateChangeCalculations(symbol);
@@ -188,6 +199,30 @@ class FinancialDashboard {
         }
         
         this.hideLoading();
+    }
+
+    async loadInitialDataBackground() {
+        try {
+            console.log('Background: Loading real commodity data from Alpha Vantage...');
+            
+            // Load current prices for all commodities
+            await this.fetchAllCurrentPrices();
+            
+            // Load historical data for current symbol and period (overview chart)
+            await this.fetchHistoricalData(this.currentSymbol, this.currentPeriod);
+            
+            // Load main chart data for current symbol and interval
+            await this.fetchMainChartData(this.currentSymbol, this.currentInterval);
+            
+            // Update UI after data is loaded
+            this.updateAllCharts();
+            this.updateUI();
+            
+            console.log('✓ Background: Data loaded and UI updated successfully!');
+        } catch (error) {
+            console.error('Background: Error loading initial data:', error);
+            console.log('Background: Continuing with simulated data');
+        }
     }
 
     async fetchAllCurrentPrices() {
@@ -1045,9 +1080,6 @@ class FinancialDashboard {
     }
 
     startRealTimeUpdates() {
-        // Initial update
-        this.updateData();
-        
         // Set up interval for regular updates (1 minute for Alpha Vantage)
         setInterval(() => {
             this.updateData();
